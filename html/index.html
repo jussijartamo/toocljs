@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width,initial-scale=1,minimal-ui" name="viewport">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700,400italic|Material+Icons">
+    <link rel="stylesheet" href="https://unpkg.com/vue-material@beta/dist/vue-material.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/vue-material@beta/dist/theme/default.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.32.0/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.32.0/theme/neo.min.css" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+    <md-speed-dial :class="['md-top-right']" md-direction="bottom">
+        <md-button v-if="workspaces.length > 1" class="md-icon-button" @click="deleteActiveWorkspace()">
+            <md-icon>close</md-icon>
+            <md-tooltip md-direction="bottom">Close active tab (Esc)</md-tooltip>
+        </md-button>
+        <md-button class="md-icon-button" @click="runCode()">
+            <md-icon>play_arrow</md-icon>
+            <md-tooltip md-direction="bottom">Run code (Ctrl + Enter)</md-tooltip>
+        </md-button>
+    </md-speed-dial>
+
+    <md-tabs md-changed="tc" md-sync-route>
+        <template slot="md-tab" slot-scope="{ tab }">
+            {{ tab.label }} <md-progress-spinner v-if="tab.data.loading" :md-diameter="10" :md-stroke="1"  md-mode="indeterminate"></md-progress-spinner>
+        </template>
+        <template v-for="workspace in workspaces">
+            <md-tab :id="workspace.id" :md-template-data="{ loading: workspace.loading }" :md-label="workspace.id" :to="workspace.path">
+                <codemirror v-model="workspace.code" :options="cmOption"></codemirror>
+            </md-tab>
+        </template>
+    </md-tabs>
+
+    <template v-for="result in workspaces.filter(w => w.active)[0].results">
+        <p v-if="result.length == 0">
+            Empty result
+        </p>
+        <md-table v-if="result.length != 0" md-card>
+            <template v-for="row in result">
+                <md-table-row>
+                    <template v-for="(cell, label) in row">
+                        <md-table-cell md-label="Jee" md-sort-by="label">{{cell}}</md-table-cell>
+                    </template>
+                </md-table-row>
+            </template>
+        </md-table>
+    </template>
+
+</div>
+<script src="https://unpkg.com/vue@2.5.13/dist/vue.js"></script>
+<script src="https://unpkg.com/vue-router@3.0.1/dist/vue-router.js"></script>
+<script src="https://unpkg.com/vue-material@1.0.0-beta-7/dist/vue-material.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.34.0/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.34.0/mode/clojure/clojure.min.js"></script>
+<script src="https://unpkg.com/vue-codemirror@4.0.3/dist/vue-codemirror.js"></script>
+<script type="application/javascript">
+Vue.use(VueMaterial.default)
+Vue.use(VueCodemirror)
+
+const router = new VueRouter({
+  routes: []
+})
+const defaultWorkspace = (n, kw) => {
+    return {
+        id: n,
+        loading: false,
+        active: true,
+        code: '\n; Checkout https://github.com/clojure/java.jdbc\n(defn q [kw sql]\n  (j/query (db kw) [sql] {}))\n\n(prn (q :'+kw+' "select * from films"))\n',
+        path: "/" + n,
+        results: []
+    };
+};
+const loaded = localStorage.getItem('workspaces')
+const loadedWorkspaces = loaded ? JSON.parse(loaded) : [defaultWorkspace('localhost','test')]
+
+
+var vue = new Vue({
+ router,
+ el: '#app',
+ watch:{
+    $route (to, from){
+        if(!vue.isExistingWorkspace(to.path)) {
+            const id = to.path.replace(/\//g,"")
+            const newW = defaultWorkspace(id, id)
+            vue.$data.workspaces.push(newW)
+        }
+        vue.setActiveWorkspace(to.path)
+    },
+    workspaces: {
+        handler() {
+          console.log('Workspaces changed! Saving to local storage!')
+          const w = JSON.stringify(this.workspaces)
+          localStorage.setItem('workspaces', w);
+        },
+        deep: true,
+    }
+ },
+ methods: {
+    isExistingWorkspace: (path) => {
+        const [a] = vue.$data.workspaces.filter(w => w.path === path)
+        return a
+    },
+    deleteActiveWorkspace: () => {
+        const workspaces = vue.$data.workspaces
+        if(workspaces.length > 1) {
+            workspaces.splice(workspaces.indexOf(vue.getActiveWorkspace()), 1)
+            localStorage.setItem('workspaces', JSON.stringify(workspaces))
+            vue.$router.push({path: workspaces[0].path})
+            window.location.reload(false);
+        }
+    },
+    getActiveWorkspace: () => {
+        const [a] = vue.$data.workspaces.filter(w => w.active)
+        return a
+    },
+    setActiveWorkspace: (path) => {
+        vue.$data.workspaces.forEach(w => {
+            w.active = w.path === path
+        })
+        const [a] = vue.$data.workspaces.filter(w => w.active)
+        if(!a) {
+            vue.$router.push({path:vue.$data.workspaces[0].path})
+        }
+    },
+    message: (msg) => {
+        console.log(msg);
+        console.log(this);
+        console.log(this.$socket);
+    },
+
+    runCode: () => {
+        const thisWorkspace = vue.getActiveWorkspace()
+        thisWorkspace.loading = true
+
+        var webSocket = new WebSocket("ws://" + location.hostname + ":" + location.port + "/t");
+
+        webSocket.onopen = () => {
+            thisWorkspace.results = []
+            webSocket.send(thisWorkspace.code)
+        };
+        webSocket.onmessage = (msg) => {
+            thisWorkspace.results.unshift(JSON.parse(msg.data))
+        }
+        webSocket.onclose = () => {
+            thisWorkspace.loading = false
+        };
+    }
+ },
+ data: {
+
+    workspaces: loadedWorkspaces,
+    cmOption: {
+        mode: 'clojure',
+        lineNumbers: true,
+        line: true,
+        tabSize: 2,
+        theme: "neo"
+    }
+ }
+})
+loadedWorkspaces.filter(w => w.active).forEach(w => {
+    console.log('setting active: ' + w.path)
+    vue.setActiveWorkspace(w.path)
+    vue.$router.push({path: w.path})
+});
+
+window.addEventListener('keyup', function(event) {
+    if (event.keyCode === 27) { //esc
+        vue.deleteActiveWorkspace()
+    } else if (event.ctrlKey && event.keyCode === 13) { // ctrl + enter
+        vue.runCode()
+    }
+});
+</script>
+</body>
+</html>
