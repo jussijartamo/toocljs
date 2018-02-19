@@ -38,10 +38,15 @@
             Empty result
         </p>
         <md-table v-if="result.length != 0" md-card>
+            <md-table-row v-if="result.length != 0">
+                <template v-for="(cell, label) in result[0]">
+                    <md-table-head>{{label}}</md-table-head>
+                </template>
+            </md-table-row>
             <template v-for="row in result">
                 <md-table-row>
                     <template v-for="(cell, label) in row">
-                        <md-table-cell md-label="Jee" md-sort-by="label">{{cell}}</md-table-cell>
+                        <md-table-cell>{{cell}}</md-table-cell>
                     </template>
                 </md-table-row>
             </template>
